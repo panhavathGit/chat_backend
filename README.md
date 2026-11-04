@@ -212,6 +212,18 @@ Every response uses one of two shapes:
 
 `meta` appears only on paginated lists; `details` appears only when there is extra info (for example, field-level validation errors on a `400`).
 
+### Testing with the Postman collection
+
+[postman/chat_backend.postman_collection.json](postman/chat_backend.postman_collection.json) tests every endpoint end-to-end (28 requests, 73 assertions): validation errors, auth failures, CRUD, and ownership rules between two users. Each run registers fresh users, so it can be re-run any time.
+
+With the dev server running:
+
+```bash
+pnpm dlx newman run postman/chat_backend.postman_collection.json
+```
+
+Or in Postman: **Import** → select the file → open the collection → **Run**. Requests must run in order, because later ones reuse the token and post id saved by earlier ones. To point at another server, change the `baseUrl` collection variable.
+
 ### Example with curl
 
 ```bash
@@ -264,7 +276,7 @@ curl -s -X DELETE $BASE/posts/<id> -H "Authorization: Bearer $TOKEN" -w '%{http_
 ```
 .
 ├── docs/
-│   └── PROJECT_GUIDELINES.MD     # Coding conventions — read before contributing
+│   └── PROJECT_GUIDELINE_IMPROVEMENTS.md  # Module rules and design decisions — read before contributing
 ├── prisma/
 │   ├── schema.prisma             # Database models (User, Post)
 │   └── migrations/               # SQL migrations (committed)
@@ -308,12 +320,23 @@ Copy the shape of `src/modules/post/`. Each module has:
 
 | File | Responsibility |
 | :--- | :--- |
-| `<name>.schema.ts` | Zod schemas for body/query/params, plus types inferred from them |
-| `<name>.repository.ts` | Prisma queries only; no business rules, no throwing |
-| `<name>.service.ts` | Business rules; throws `AppError` subclasses; no `req`/`res` |
-| `<name>.controller.ts` | Reads `req`, calls the service, sends `{ status: 'success', data }` |
-| `<name>.routes.ts` | Wires `authenticate` → `validate(...)` → controller |
-| `index.ts` | Exports the router (and anything other modules may use) |
+| `<name>.schema.ts` | Zod schemas for body/query/params (no exported types; request DTOs are paused) |
+| `<name>.repository.ts` | `class XRepository { constructor(db) }`: Prisma queries only, each with a `select` whitelist (e.g. `postSelect`); no business rules, no throwing |
+| `<name>.service.ts` | `class XService { constructor(repository) }`: business rules; throws `AppError` subclasses; no `req`/`res` |
+| `<name>.controller.ts` | `class XController { constructor(service) }`: reads `req`, calls the service, sends `{ status: 'success', data }`. Handlers are arrow-function properties. |
+| `<name>.routes.ts` | **Composition root**: creates repository → service → controller once, then wires `authenticate` → `validate(...)` → controller handler |
+| `index.ts` | Exports the router (and any instance other code needs, e.g. `authService` for passport) |
+
+Each layer receives the layer below through its constructor and imports it with `import type` only:
+
+```ts
+// <name>.routes.ts
+const postRepository = new PostRepository(prisma);
+const postService = new PostService(postRepository);
+const postController = new PostController(postService);
+```
+
+See [How dependencies are wired](docs/PROJECT_GUIDELINE_IMPROVEMENTS.md#1-how-dependencies-are-wired) for the rules and why.
 
 Steps:
 
@@ -328,7 +351,7 @@ Conventions:
 - Use the logger, never `console.log`.
 - Read config from `@config/env.js`, never `process.env` directly.
 
-See [docs/PROJECT_GUIDELINES.MD](docs/PROJECT_GUIDELINES.MD) for the full conventions.
+See [docs/PROJECT_GUIDELINE_IMPROVEMENTS.md](docs/PROJECT_GUIDELINE_IMPROVEMENTS.md) for the module rules and the reasons behind them.
 
 ---
 

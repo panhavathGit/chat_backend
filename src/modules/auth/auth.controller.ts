@@ -1,23 +1,25 @@
 import type { Request, Response } from 'express';
 import { getAuthUser } from '@shared/middleware/auth.middleware.js';
-import { authService } from './auth.service.js';
-import type { RegisterInput } from './auth.schema.js';
+import type { AuthService } from './auth.service.js';
 
-export const authController = {
-  async register(req: Request, res: Response) {
-    const result = await authService.register(req.body as RegisterInput);
+// * Handlers are arrow-function properties so `this` stays bound when passed to the router
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
+
+  register = async (req: Request, res: Response) => {
+    const result = await this.authService.register(req.body);
     res.status(201).json({ status: 'success', data: result });
-  },
+  };
 
-  login(req: Request, res: Response) {
+  login = (req: Request, res: Response) => {
     const user = getAuthUser(req);
     res.status(200).json({
       status: 'success',
-      data: { user, accessToken: authService.issueToken(user) },
+      data: { user, accessToken: this.authService.issueToken(user) },
     });
-  },
+  };
 
-  me(req: Request, res: Response) {
+  me = (req: Request, res: Response) => {
     res.status(200).json({ status: 'success', data: getAuthUser(req) });
-  },
-};
+  };
+}

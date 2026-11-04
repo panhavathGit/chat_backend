@@ -14,7 +14,9 @@ This document is the starting point for anyone new to the Chat Backend codebase.
     - [Directory Layout](#directory-layout)
     - [Request Lifecycle](#request-lifecycle)
     - [Layered Module Pattern](#layered-module-pattern)
+    - [Dependency Injection](#dependency-injection)
   - [Module Structure \& File Conventions](#module-structure--file-conventions)
+    - [When to Split a Module by Audience](#when-to-split-a-module-by-audience)
     - [File Naming Reference](#file-naming-reference)
   - [Coding Conventions](#coding-conventions)
     - [Naming](#naming)
@@ -126,6 +128,52 @@ Routes → Controller → Service → Repository → Prisma (DB)
 | **Service**    | Business logic, validation, orchestration         | No `req`/`res` references          |
 | **Repository** | Prisma queries only                               | No business logic, no error throws |
 
+### Dependency Injection
+
+Each layer is a **class** that receives the layer below it through its **constructor**. A layer never imports another layer's instance directly; it only imports its **type**. The module's `<name>.routes.ts` is the composition root: it creates the instances once and wires them together.
+
+```typescript
+// post.repository.ts
+export class PostRepository {
+  constructor(private readonly db: DatabaseClient) {}
+  findById(id: string) {
+    return this.db.post.findUnique({ where: { id } });
+  }
+}
+
+// post.service.ts
+import type { PostRepository } from './post.repository.js'; // type-only import
+export class PostService {
+  constructor(private readonly postRepository: PostRepository) {}
+}
+
+// post.controller.ts
+import type { PostService } from './post.service.js'; // type-only import
+export class PostController {
+  constructor(private readonly postService: PostService) {}
+
+  // Arrow-function property, so `this` stays bound when passed to the router
+  getById = async (req: Request, res: Response) => { ... };
+}
+
+// post.routes.ts — composition root
+const postRepository = new PostRepository(prisma);
+const postService = new PostService(postRepository);
+const postController = new PostController(postService);
+
+postRouter.get('/:id', validate({ params: postIdParamSchema }), postController.getById);
+```
+
+**Rules:**
+
+- **Every dependency comes in through the constructor, with no default values.** `constructor(private repo = new BannerRepository())` hides the dependency, and a test that forgets the argument silently uses the real database.
+- **Repositories receive the database client** (`constructor(private readonly db: DatabaseClient)`). They never import `prisma` directly; only the composition root does.
+- **Dependencies are `private readonly`**, so nothing can reassign them at runtime.
+- Controller handlers are **arrow-function properties**, never prototype methods. A method passed as `controller.getById` loses `this` and crashes at runtime.
+- Services and controllers import the layer below with `import type`, so the only `new` calls live in `<name>.routes.ts`.
+- Code outside the module (e.g. `@config/passport.ts`) uses the **instance exported from the module's `index.ts`**, and talks to the service, never to the repository.
+- In tests, construct the class with a fake dependency: `new PostService(fakeRepository)`.
+
 ---
 
 ## Module Structure & File Conventions
@@ -151,6 +199,26 @@ src/modules/repayment/
 │   └── repayment.repository.ts     ← shared DB access
 └── index.ts                        ← exports only public routers + repository
 ```
+
+### When to Split a Module by Audience
+
+- **One audience:** keep the module flat (`src/modules/post/post.*.ts`). Don't create audience folders ahead of time.
+- **Two or more audiences:** split into one folder per audience, named `<audience>-<module>/`, and move the repository into `shared/<module>.repository.ts`.
+
+| Audience prefix | Namespace | Who |
+| --------------- | --------- | --- |
+| `customer-` | `/customer/api/v1` | Customers using the Flutter app |
+| `agent-` | `/agent/api/v1` | Internal staff |
+| `guest-` | `/customer/api/v1` (no `authenticate`) | Public, not logged in |
+
+When splitting:
+
+- Each audience's `<audience>-<module>.routes.ts` is its own composition root and creates its own repository instance (`new PostRepository(prisma)`). Repositories hold no state, so separate instances are fine.
+- `index.ts` exports one router per audience (`customerPostRouter`, `agentPostRouter`).
+- Each namespace gets its own router in `src/routes/v1.ts` (`customerV1Router`, `agentV1Router`), mounted separately in `app.ts`.
+- Rules that differ per audience (e.g. "only your own posts" vs. "staff can moderate any post") live in that audience's service, never in the shared repository.
+
+Every module, split or not, keeps tests in `__tests__/` next to the code, and response types in `types/<name>.types.ts`. See [PROJECT_GUIDELINE_IMPROVEMENTS.md](./PROJECT_GUIDELINE_IMPROVEMENTS.md#2-folder-layout) for the full worked example.
 
 ### File Naming Reference
 
@@ -460,6 +528,7 @@ refactor(schema): normalize role/permission into 3-table design
 
 ## Related
 
+- [Project Guideline Improvements](./PROJECT_GUIDELINE_IMPROVEMENTS.md) — comparison with the banner reference module, and decisions on DI, folder layout and response shape
 - [Module Authoring Guide](./module-authoring-guide.md) — step-by-step guide to creating a new module
 - [API Response Contracts](./api-response-contracts.md) — standard response and error shapes
 - [Project README](../README.md) — setup, infrastructure, and project overview

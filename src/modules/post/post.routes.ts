@@ -1,8 +1,15 @@
 import { Router } from 'express';
+import { prisma } from '@config/database.js';
 import { authenticate } from '@shared/middleware/auth.middleware.js';
 import { validate } from '@shared/middleware/validate.middleware.js';
-import { postController } from './post.controller.js';
+import { PostController } from './post.controller.js';
+import { PostRepository } from './post.repository.js';
+import { PostService } from './post.service.js';
 import { createPostSchema, listPostsQuerySchema, postIdParamSchema, updatePostSchema } from './post.schema.js';
+
+const postRepository = new PostRepository(prisma);
+const postService = new PostService(postRepository);
+const postController = new PostController(postService);
 
 export const postRouter = Router();
 

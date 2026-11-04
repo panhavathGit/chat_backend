@@ -2,7 +2,7 @@ import passport from 'passport';
 import { ExtractJwt, Strategy as JwtStrategy } from 'passport-jwt';
 import { Strategy as LocalStrategy } from 'passport-local';
 import { env } from './env.js';
-import { authRepository, authService } from '@modules/auth/index.js';
+import { authService } from '@modules/auth/index.js';
 
 passport.use(
   new LocalStrategy({ usernameField: 'email', session: false }, (email, password, done) => {
@@ -23,8 +23,8 @@ passport.use(
     (payload: { sub?: string }, done) => {
       if (!payload.sub) return done(null, false);
       // * Looking the user up on every request means deleted accounts lose access immediately
-      authRepository
-        .findById(payload.sub)
+      authService
+        .findUserById(payload.sub)
         .then((user) => done(null, user ?? false))
         .catch(done);
     },
